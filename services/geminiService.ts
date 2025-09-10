@@ -1,6 +1,12 @@
 import { GoogleGenAI, Modality, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { ImageData } from "../types";
 
+const apiKey = import.meta.env.VITE_API_KEY;
+
+if (!apiKey) {
+  throw new Error('VITE_API_KEY is not set');
+}
+
 const API_KEY = process.env.API_KEY;
 
 if (!API_KEY) {
@@ -36,21 +42,21 @@ const systemInstruction = "You are a responsible AI image editing assistant. You
 export const editImageWithGemini = async (originalImage: ImageData, prompt: string, referenceImage: ImageData | null): Promise<string> => {
   try {
     const parts: ({ text: string } | { inlineData: { data: string, mimeType: string } })[] = [
-        {
-            inlineData: {
-                data: originalImage.base64,
-                mimeType: originalImage.mimeType,
-            },
+      {
+        inlineData: {
+          data: originalImage.base64,
+          mimeType: originalImage.mimeType,
         },
+      },
     ];
 
     if (referenceImage) {
-        parts.push({
-            inlineData: {
-                data: referenceImage.base64,
-                mimeType: referenceImage.mimeType,
-            },
-        });
+      parts.push({
+        inlineData: {
+          data: referenceImage.base64,
+          mimeType: referenceImage.mimeType,
+        },
+      });
     }
 
     parts.push({ text: prompt });
@@ -72,27 +78,27 @@ export const editImageWithGemini = async (originalImage: ImageData, prompt: stri
         }
       }
     }
-    
+
     // If no image is returned, check for our specific child-related error text
     const responseText = response.text;
     if (responseText && responseText.includes('Image appears to contain a child')) {
-        throw new Error("For safety, images of children cannot be processed. Please upload a different image.");
+      throw new Error("For safety, images of children cannot be processed. Please upload a different image.");
     }
-    
+
     throw new Error("The AI did not return an image. This might be due to a safety filter blocking the result. Please try a different prompt or image.");
 
   } catch (error) {
     console.error("Error calling Gemini API:", error);
     if (error instanceof Error) {
-        // Pass our specific user-friendly error through
-        if (error.message.includes("images of children cannot be processed")) {
-            throw error;
-        }
-        // Provide a more generic error for other safety violations.
-        if (error.message.toUpperCase().includes('SAFETY') || error.message.toUpperCase().includes('BLOCKED')) {
-            throw new Error("Your request was blocked for safety reasons. Please adjust your prompt or use a different image.");
-        }
-        throw new Error(`Failed to edit image: ${error.message}`);
+      // Pass our specific user-friendly error through
+      if (error.message.includes("images of children cannot be processed")) {
+        throw error;
+      }
+      // Provide a more generic error for other safety violations.
+      if (error.message.toUpperCase().includes('SAFETY') || error.message.toUpperCase().includes('BLOCKED')) {
+        throw new Error("Your request was blocked for safety reasons. Please adjust your prompt or use a different image.");
+      }
+      throw new Error(`Failed to edit image: ${error.message}`);
     }
     throw new Error("An unexpected error occurred while communicating with the AI.");
   }
