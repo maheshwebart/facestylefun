@@ -1,1 +1,6 @@
-/*   /index.html   200
+*** /dev/null
+--- a/public/_redirects
++++ b/public/_redirects
+@@
++/*  /index.html  200
+

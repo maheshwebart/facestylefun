@@ -1,0 +1,11 @@
+*** /dev/null --- a/src/index.css+++b/src/index.css @@+
+
+/* Basic app styles; replace with Tailwind build later if needed */
++:root {
+    color-scheme: light dark;
+}
+
++body {
+    margin: 0;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+}
