@@ -1,105 +1,113 @@
-import { GoogleGenAI, Modality, HarmCategory, HarmBlockThreshold } from "@google/genai";
-import { ImageData } from "../types";
+// src/services/geminiService.ts
 
-const apiKey = import.meta.env.VITE_API_KEY;
-
+// ---- Config ----
+const apiKey = import.meta.env.VITE_API_KEY as string | undefined;
 if (!apiKey) {
-  throw new Error('VITE_API_KEY is not set');
+  // This stops the app early with a clear message (matches the console error you saw)
+  throw new Error("VITE_API_KEY is not set");
 }
 
-const API_KEY = process.env.API_KEY;
+// Choose a Gemini model you enabled in Google AI Studio
+// Common options: "gemini-1.5-flash", "gemini-1.5-pro"
+type ModelName = "gemini-1.5-flash" | "gemini-1.5-pro";
+const MODEL: ModelName = "gemini-1.5-flash";
 
-if (!API_KEY) {
-  throw new Error("API_KEY environment variable not set.");
-}
+const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
-const ai = new GoogleGenAI({ apiKey: API_KEY });
-
-// Define strict safety settings to prevent unsafe content generation.
-const safetySettings = [
-  {
-    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-    threshold: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-    threshold: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-    threshold: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-    threshold: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-  },
-];
-
-// System instruction to prevent processing images of minors.
-const systemInstruction = "You are a responsible AI image editing assistant. Your most critical safety rule is to never process, edit, or generate images that depict children or individuals who appear to be under 18 years of age. If an uploaded image seems to contain a minor, you must strictly refuse the request. Do not proceed with the edit. Instead, reply with only the following text: 'Error: Image appears to contain a child and cannot be processed.'";
-
-
-export const editImageWithGemini = async (originalImage: ImageData, prompt: string, referenceImage: ImageData | null): Promise<string> => {
-  try {
-    const parts: ({ text: string } | { inlineData: { data: string, mimeType: string } })[] = [
-      {
-        inlineData: {
-          data: originalImage.base64,
-          mimeType: originalImage.mimeType,
-        },
-      },
-    ];
-
-    if (referenceImage) {
-      parts.push({
-        inlineData: {
-          data: referenceImage.base64,
-          mimeType: referenceImage.mimeType,
-        },
-      });
-    }
-
-    parts.push({ text: prompt });
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image-preview',
-      contents: { parts },
-      config: {
-        responseModalities: [Modality.IMAGE, Modality.TEXT],
-        safetySettings,
-        systemInstruction,
-      },
-    });
-
-    if (response?.candidates?.[0]?.content?.parts) {
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-          return part.inlineData.data; // Success, return image data
-        }
-      }
-    }
-
-    // If no image is returned, check for our specific child-related error text
-    const responseText = response.text;
-    if (responseText && responseText.includes('Image appears to contain a child')) {
-      throw new Error("For safety, images of children cannot be processed. Please upload a different image.");
-    }
-
-    throw new Error("The AI did not return an image. This might be due to a safety filter blocking the result. Please try a different prompt or image.");
-
-  } catch (error) {
-    console.error("Error calling Gemini API:", error);
-    if (error instanceof Error) {
-      // Pass our specific user-friendly error through
-      if (error.message.includes("images of children cannot be processed")) {
-        throw error;
-      }
-      // Provide a more generic error for other safety violations.
-      if (error.message.toUpperCase().includes('SAFETY') || error.message.toUpperCase().includes('BLOCKED')) {
-        throw new Error("Your request was blocked for safety reasons. Please adjust your prompt or use a different image.");
-      }
-      throw new Error(`Failed to edit image: ${error.message}`);
-    }
-    throw new Error("An unexpected error occurred while communicating with the AI.");
-  }
+// ---- Types (minimal) ----
+type GenerateContentRequest = {
+  contents: Array<{
+    role?: "user" | "model";
+    parts: Array<{ text?: string }>;
+  }>;
+  safetySettings?: unknown;
+  generationConfig?: {
+    temperature?: number;
+    topP?: number;
+    topK?: number;
+    maxOutputTokens?: number;
+  };
 };
+
+type GenerateContentResponse = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{ text?: string }>;
+    };
+    finishReason?: string;
+  }>;
+  promptFeedback?: unknown;
+  error?: { message?: string };
+};
+
+// ---- Helpers ----
+function extractText(res: GenerateContentResponse): string {
+  const text =
+    res?.candidates?.[0]?.content?.parts?.[0]?.text ??
+    "";
+  return text.trim();
+}
+
+async function postJSON<T>(url: string, body: unknown): Promise<T> {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!r.ok) {
+    const errText = await r.text().catch(() => "");
+    throw new Error(
+      `Gemini API ${r.status} ${r.statusText} — ${errText.slice(0, 400)}`
+    );
+  }
+  return (await r.json()) as T;
+}
+
+// ---- Public API ----
+
+/**
+ * Generate text from a prompt using Google Gemini (REST).
+ * Example:
+ *   const out = await generateText("Give me 3 hairstyle ideas for round faces");
+ */
+export async function generateText(
+  prompt: string,
+  opts?: {
+    temperature?: number;
+    maxOutputTokens?: number;
+    topP?: number;
+    topK?: number;
+    model?: ModelName;
+  }
+): Promise<string> {
+  const model = opts?.model ?? MODEL;
+
+  const url = `${API_BASE}/models/${model}:generateContent?key=${encodeURIComponent(
+    apiKey!
+  )}`;
+
+  const body: GenerateContentRequest = {
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: prompt }],
+      },
+    ],
+    generationConfig: {
+      temperature: opts?.temperature ?? 0.7,
+      topP: opts?.topP ?? 0.9,
+      topK: opts?.topK ?? 32,
+      maxOutputTokens: opts?.maxOutputTokens ?? 512,
+    },
+  };
+
+  const res = await postJSON<GenerateContentResponse>(url, body);
+  const text = extractText(res);
+  if (!text) {
+    throw new Error("Gemini returned no content. Check model access/quota.");
+  }
+  return text;
+}
